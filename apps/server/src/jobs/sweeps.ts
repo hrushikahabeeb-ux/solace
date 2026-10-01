@@ -18,7 +18,7 @@ import { publishToUser } from '../realtime/hub.js';
 
 async function fireDueScheduledMessages(): Promise<void> {
   const due = await prisma.message.findMany({
-    where: { scheduledFor: { lte: new Date() } },
+      where: { scheduledFor: { not: null, lte: new Date() } },
     include: { media: true },
   });
   for (const message of due) {
@@ -45,7 +45,7 @@ async function fireDueScheduledMessages(): Promise<void> {
 
 async function expireDisappearingMessages(): Promise<void> {
   const expired = await prisma.message.findMany({
-    where: { expiresAt: { lte: new Date() }, deletedAt: null },
+      where: { expiresAt: { not: null, lte: new Date() }, deletedAt: null },
   });
   for (const message of expired) {
     await prisma.message.update({
