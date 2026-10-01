@@ -1,0 +1,383 @@
+// Solace — core data model, stored in MongoDB.
+// Every model maps its `id` to MongoDB's `_id`. Apply schema changes with
+// `npm run db:push` (Prisma Migrate is not used with MongoDB). Optional fields are always
+// written as explicit nulls (see src/lib/nullParity.ts) so null filters behave exactly
+// as they did on PostgreSQL.
+// Hard rule: no column in this schema ever stores plaintext message content,
+// plaintext media, or a private key. Anything content-shaped is `Bytes` ciphertext.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URL")
+}
+
+model User {
+  id           String   @id @default(uuid()) @map("_id")
+  username     String   @unique
+  displayName  String
+  passwordHash String // Argon2id hash, never plaintext password
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+
+  devices       Device[]
+  memberships   ConversationMember[]
+  messages      Message[]
+  reactions     Reaction[]
+  starred       StarredMessage[]
+  receipts      MessageReceipt[]
+  blockedByMe   Block[]              @relation("BlockedBy")
+  blockedMe     Block[]              @relation("BlockedTarget")
+  createdTasks  Task[]               @relation("TaskCreator")
+  assignedTasks Task[]               @relation("TaskAssignee")
+  eventRsvps    EventParticipant[]
+}
+
+// One row per logged-in client instance. Public key material only.
+model Device {
+  id                 String   @id @default(uuid()) @map("_id")
+  userId             String
+  user               User     @relation(fields: [userId], references: [id])
+  label              String // e.g. "Chrome on macOS"
+  identityKeyPublic  String // ECDH P-256 identity public key (raw, uncompressed), base64
+  signedPreKeyPublic String // DEPRECATED: unused since E2EE v2, always ''. Safe to drop in a later migration.
+  signedPreKeySig    String // DEPRECATED: unused since E2EE v2, always ''. Safe to drop in a later migration.
+  createdAt          DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+
+  oneTimePreKeys OneTimePreKey[]
+
+  @@index([userId])
+}
+
+// DEPRECATED: unused since E2EE v2 (stateless encryption has no one-time keys). The table
+// is kept only so this change needs no database migration; it can be dropped later.
+model OneTimePreKey {
+  id        String @id @default(uuid()) @map("_id")
+  deviceId  String
+  device    Device @relation(fields: [deviceId], references: [id])
+  publicKey String
+
+  @@index([deviceId])
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+  CHANNEL
+}
+
+model Conversation {
+  id                 String           @id @default(uuid()) @map("_id")
+  type               ConversationType
+  title              String? // null for DIRECT, required for GROUP/CHANNEL
+  disappearingSeconds Int? // when set, new messages get expiresAt = createdAt + this
+  createdAt          DateTime         @default(now())
+
+  members  ConversationMember[]
+  messages Message[]
+  pins     PinnedMessage[]
+  workspace Workspace?
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid()) @map("_id")
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  role           MemberRole   @default(MEMBER)
+  joinedAt       DateTime     @default(now())
+  mutedUntil     DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+enum MessageType {
+  TEXT // end-to-end encrypted text payload (multi-recipient envelope, see packages/crypto)
+  MEDIA // reference to a MediaObject, key material is inside the encrypted body
+  SYSTEM // membership changes etc. — still encrypted per-conversation
+}
+
+model Message {
+  id             String       @id @default(uuid()) @map("_id")
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  type           MessageType
+  ciphertext     String // versioned E2EE envelope ("s2." + JSON) — opaque to the server
+  olmMessageType Int // LEGACY: always 0 since E2EE v2. Retained so no database migration is required.
+  sessionRef     String // "e2:{conversationId}:{senderDeviceId}" — identifies the sender device for the recipient
+  replyToId      String?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  expiresAt      DateTime? // disappearing messages
+  scheduledFor   DateTime? // scheduled sends
+  createdAt      DateTime     @default(now())
+
+  reactions Reaction[]
+  starredBy StarredMessage[]
+  media     MediaObject[]
+  receipts  MessageReceipt[]
+  pinnedAs  PinnedMessage[]
+
+  @@index([conversationId, createdAt])
+}
+
+// Delivery/read tracking. One row per (message, recipient) — the server can tell a
+// sender "delivered" / "read" without ever needing to see the message content.
+model MessageReceipt {
+  id          String    @id @default(uuid()) @map("_id")
+  messageId   String
+  message     Message   @relation(fields: [messageId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  @@unique([messageId, userId])
+}
+
+// Encrypted blob stored in object storage. The server only ever sees ciphertext bytes;
+// the AES key/IV live inside the encrypted Message body, never here.
+model MediaObject {
+  id            String   @id @default(uuid()) @map("_id")
+  messageId     String
+  message       Message  @relation(fields: [messageId], references: [id])
+  storageKey    String // object storage path to the ciphertext blob
+  sizeBytes     Int
+  contentHash   String // hash of the CIPHERTEXT, for integrity/dedup — not plaintext
+  mimeTypeGuess String? // best-effort, sender-declared; never trusted for security decisions
+  folderId      String? // workspace folder this file has been organized into, if any
+  createdAt     DateTime @default(now())
+}
+
+model Reaction {
+  id        String   @id @default(uuid()) @map("_id")
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+}
+
+model StarredMessage {
+  id        String   @id @default(uuid()) @map("_id")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, messageId])
+}
+
+// One conversation can have several pinned messages; pinning is a conversation-level
+// action visible to every member (unlike starring, which is personal).
+model PinnedMessage {
+  id             String       @id @default(uuid()) @map("_id")
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  messageId      String
+  message        Message      @relation(fields: [messageId], references: [id])
+  pinnedById     String
+  createdAt      DateTime     @default(now())
+
+  @@unique([conversationId, messageId])
+}
+
+model Block {
+  id            String   @id @default(uuid()) @map("_id")
+  blockerId     String
+  blocker       User     @relation("BlockedBy", fields: [blockerId], references: [id])
+  blockedUserId String
+  blockedUser   User     @relation("BlockedTarget", fields: [blockedUserId], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@unique([blockerId, blockedUserId])
+}
+
+// A small durable queue for point-to-point payloads that aren't conversation messages —
+// historically Megolm "room key" deliveries in the earlier Olm-based design.
+// DEPRECATED: unused since E2EE v2 (no room keys are delivered any more). The table is
+// kept only so this change needs no database migration; it can be dropped later.
+model ToDeviceMessage {
+  id             String   @id @default(uuid()) @map("_id")
+  targetUserId   String
+  targetDeviceId String
+  fromUserId     String
+  kind           String // "room_key" today; open string so future to-device kinds don't need a migration
+  payload        Json
+  createdAt      DateTime @default(now())
+
+  @@index([targetUserId, targetDeviceId])
+}
+
+// Moderation record. The server cannot see message plaintext, so a report carries
+// only whatever the reporter chooses to type in `reason` — never a re-decrypted copy
+// of the message content.
+model Report {
+  id         String   @id @default(uuid()) @map("_id")
+  messageId  String
+  reporterId String
+  reason     String
+  createdAt  DateTime @default(now())
+
+  @@index([messageId])
+}
+
+// ============================================================================
+// Workspace, Tasks, Planning, Files
+//
+// A Workspace is not a parallel system — it's a 1:1 attachment to an existing GROUP
+// conversation. This means it inherits that conversation's membership, roles
+// (OWNER/ADMIN/MEMBER via ConversationMember — no second permission system), AND,
+// critically, its membership-derived recipient set (see packages/crypto/src/engine.ts
+// and apps/web/src/lib/e2ee.ts). Task titles/descriptions, event descriptions,
+// notes, and poll content are therefore ENCRYPTED CLIENT-SIDE with the same
+// multi-recipient envelope scheme before they ever reach this schema — every `*Ciphertext` field below is
+// opaque to the server, exactly like Message.ciphertext. Fields that are NOT
+// ciphertext (status, dueDate, priority, assigneeId, event date/time) are deliberately
+// plaintext metadata, the same way a message's timestamp and sender are: the server
+// genuinely needs them to build the dashboard, sort a board, and fire "due soon"
+// reminders. Content stays private; scheduling metadata doesn't pretend to.
+// ============================================================================
+
+model Workspace {
+  id             String   @id @default(uuid()) @map("_id")
+  conversationId String   @unique
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  name           String // plaintext — this is the group's title, already visible to the server via Conversation.title
+  emoji          String?
+  description    String? // short plaintext tagline shown on the dashboard; NOT the same as private notes/task content
+  createdAt      DateTime @default(now())
+
+  tasks   Task[]
+  events  Event[]
+  folders Folder[]
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Task {
+  id                 String       @id @default(uuid()) @map("_id")
+  workspaceId        String
+  workspace          Workspace    @relation(fields: [workspaceId], references: [id])
+  titleCiphertext     String // E2EE envelope — see file header
+  descriptionCiphertext String? // E2EE envelope — see file header
+  sessionRef         String // which group session encrypted the fields above (see Message.sessionRef)
+  status             TaskStatus   @default(TODO)
+  priority           TaskPriority @default(MEDIUM)
+  dueDate            DateTime?
+  labels             String[] // plaintext tags — deliberately not encrypted, so the board can filter/color by them
+  assigneeId         String?
+  assignee           User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById        String
+  createdBy          User         @relation("TaskCreator", fields: [createdById], references: [id])
+  sourceMessageId    String? // the message this task was created from, if any — lets the UI "jump to original message"
+  mongoThreadId      String       @default(uuid()) // groups this task's comments/activity docs in MongoDB
+  createdAt          DateTime     @default(now())
+  completedAt        DateTime?
+
+  subtasks    Subtask[]
+  attachments TaskAttachment[]
+
+  @@index([workspaceId, status])
+}
+
+model Subtask {
+  id         String   @id @default(uuid()) @map("_id")
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id])
+  titleCiphertext String // E2EE envelope, same recipient set as the parent task
+  sessionRef String
+  done       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+// Links an existing MediaObject/message attachment to a task, without duplicating it.
+model TaskAttachment {
+  id        String  @id @default(uuid()) @map("_id")
+  taskId    String
+  task      Task    @relation(fields: [taskId], references: [id])
+  messageId String // the MEDIA message this attachment refers to
+}
+
+model Event {
+  id                 String    @id @default(uuid()) @map("_id")
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id])
+  titleCiphertext     String // E2EE envelope
+  descriptionCiphertext String? // E2EE envelope
+  locationCiphertext  String? // E2EE envelope — location can be sensitive (a home address, etc.)
+  onlineLinkCiphertext String? // E2EE envelope
+  sessionRef         String
+  startAt            DateTime // plaintext — the server needs this to fire reminders and answer calendar queries
+  endAt              DateTime?
+  timezone           String // IANA name, e.g. "Asia/Kolkata" — plaintext, needed to compute reminder fire times correctly
+  recurrenceRule     String? // RFC 5545 RRULE string, plaintext (e.g. "FREQ=WEEKLY;BYDAY=FR")
+  sourceMessageId    String?
+  createdById        String
+  createdAt          DateTime  @default(now())
+
+  participants EventParticipant[]
+
+  @@index([workspaceId, startAt])
+}
+
+enum RsvpStatus {
+  GOING
+  MAYBE
+  DECLINED
+  PENDING
+}
+
+model EventParticipant {
+  id       String     @id @default(uuid()) @map("_id")
+  eventId  String
+  event    Event      @relation(fields: [eventId], references: [id])
+  userId   String
+  user     User       @relation(fields: [userId], references: [id])
+  rsvp     RsvpStatus @default(PENDING)
+  respondedAt DateTime?
+
+  @@unique([eventId, userId])
+}
+
+// Folders are metadata-only (a name + a parent pointer) — the files inside are
+// existing MEDIA messages, just tagged with a folderId. No file content lives here.
+model Folder {
+  id          String    @id @default(uuid()) @map("_id")
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  nameCiphertext String // E2EE envelope — a folder name like "Tax documents 2024" can itself be sensitive
+  sessionRef  String
+  parentId    String?
+  parent      Folder?   @relation("FolderChildren", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children    Folder[]  @relation("FolderChildren")
+  createdAt   DateTime  @default(now())
+}

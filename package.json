@@ -1,0 +1,15 @@
+{
+  "name": "solace",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w @solace/web",
+    "dev:server": "npm run dev -w @solace/server",
+    "prisma:generate": "npm run prisma:generate -w @solace/server",
+    "db:setup": "npm run db:setup -w @solace/server",
+    "db:push": "npm run db:push -w @solace/server"
+  }
+}

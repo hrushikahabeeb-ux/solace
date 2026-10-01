@@ -1,0 +1,56 @@
+/**
+ * Solace design tokens.
+ * Palette sourced from the approved theme reference: dusty lavender-navy background,
+ * blush-pink card surfaces, peach and cream accents, muted coral for emphasis.
+ * These are the ONLY color values that should be referenced by component code —
+ * never hardcode a hex value in a component.
+ */
+
+:root {
+  /* Base surfaces */
+  --color-bg-canvas: #2b2b45;       /* dark muted navy/lavender app background */
+  --color-bg-canvas-alt: #34324f;   /* slightly lighter navy panel */
+  --color-bg-card: #f7e3dd;         /* blush-pink paper/card surface */
+  --color-bg-card-alt: #f2d6cd;     /* secondary card tone */
+  --color-bg-cream: #fbf1e7;        /* cream surface for input fields / bubbles */
+
+  /* Brand / accent */
+  --color-accent-coral: #e08e79;    /* muted coral — primary actions, active states */
+  --color-accent-coral-hover: #d97e67;
+  --color-accent-peach: #f0b79a;    /* peach — secondary accents, badges */
+  --color-accent-lavender: #8f93c2; /* dusty lavender-blue — links, secondary UI */
+  --color-accent-lavender-deep: #5c5f8a;
+
+  /* Text */
+  --color-text-on-canvas: #f2ece6;      /* light text on dark navy */
+  --color-text-on-canvas-muted: #b9b8d6;
+  --color-text-on-card: #3a2e33;        /* dark warm text on blush card */
+  --color-text-on-card-muted: #8a6f6a;
+
+  /* Semantic */
+  --color-success: #8fae8b;
+  --color-warning: #e0b569;
+  --color-danger: #c96a63;
+  --color-border-soft: rgba(58, 46, 51, 0.12);
+  --color-border-on-canvas: rgba(242, 236, 230, 0.14);
+
+  /* Message bubbles */
+  --color-bubble-outgoing: var(--color-accent-coral);
+  --color-bubble-outgoing-text: #fbf1e7;
+  --color-bubble-incoming: var(--color-bg-cream);
+  --color-bubble-incoming-text: var(--color-text-on-card);
+
+  /* Elevation */
+  --shadow-card: 0 20px 60px -20px rgba(20, 18, 40, 0.55);
+  --shadow-soft: 0 8px 24px -12px rgba(20, 18, 40, 0.35);
+
+  /* Radii — soft, handcrafted feel, never sharp corners */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+
+  /* Typography */
+  --font-display: 'Fraunces', 'Georgia', serif;   /* for headings — artistic, editorial */
+  --font-body: 'Inter', system-ui, sans-serif;
+}

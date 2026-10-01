@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --workspaces --include-workspace-root
+      - run: npm run prisma:generate
+        env:
+          MONGODB_URL: mongodb://localhost:27017/solace
+      - name: Test crypto package
+        run: npm test -w @solace/crypto
+      # Starts an in-process MongoDB replica set (mongodb-memory-server); no services needed.
+      - name: Test server (call signaling, null parity, media URLs)
+        run: npm test -w @solace/server
+      - name: Typecheck server
+        run: npx tsc -p apps/server/tsconfig.json --noEmit
+      - name: Build web
+        run: npm run build -w @solace/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000

@@ -1,0 +1,50 @@
+@import '../../../../packages/design-tokens/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-on-canvas);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+}
+
+/* Decorative organic blobs used behind the auth card, per the theme reference.
+   Pure CSS radial-gradients — no external image assets, so the look ships instantly
+   and stays crisp at any viewport size. */
+.solace-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.solace-backdrop::before,
+.solace-backdrop::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(2px);
+  opacity: 0.35;
+}
+
+.solace-backdrop::before {
+  width: 620px;
+  height: 620px;
+  background: radial-gradient(circle at 30% 30%, var(--color-accent-lavender), transparent 70%);
+  top: -220px;
+  left: -180px;
+}
+
+.solace-backdrop::after {
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle at 60% 40%, var(--color-accent-peach), transparent 70%);
+  bottom: -200px;
+  right: -160px;
+}

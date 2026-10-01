@@ -1,0 +1,15 @@
+# Caddy reverse proxy for a single-server deployment (see DEPLOYMENT.md).
+# Caddy auto-provisions and renews TLS certificates via Let's Encrypt for whatever
+# domains you put here — replace these with your real domains and point their DNS at
+# this host. No manual certbot/nginx TLS config needed. WebSockets (/ws) are proxied
+# automatically. Caddy sets X-Forwarded-Proto/-Host, which the API uses to build
+# media upload/download URLs.
+
+chat.example.com {
+	reverse_proxy localhost:3000
+}
+
+api.example.com {
+	# Encrypted media uploads can be up to 500 MiB; do not cap request bodies here.
+	reverse_proxy localhost:4000
+}
