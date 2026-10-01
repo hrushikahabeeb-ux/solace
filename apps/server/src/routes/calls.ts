@@ -37,8 +37,15 @@ export function buildIceServers(userId: string, env: NodeJS.ProcessEnv, nowMs = 
 
   if (stunUrls.length > 0) iceServers.push({ urls: stunUrls });
 
+  const turnUsername = env.TURN_USERNAME;
+  const turnPassword = env.TURN_PASSWORD;
+
   let relayAvailable = false;
-  if (turnUrls.length > 0 && turnSecret) {
+  if (turnUrls.length > 0 && !turnSecret && turnUsername && turnPassword) {
+    // Static credentials from a hosted TURN provider.
+    iceServers.push({ urls: turnUrls, username: turnUsername, credential: turnPassword });
+    relayAvailable = true;
+  } else if (turnUrls.length > 0 && turnSecret) {
     // TURN REST API credentials (draft-uberti-behave-turn-rest): the username carries its
     // own expiry, and the password is an HMAC of it under the secret shared with coturn.
     // Nothing long-lived is ever sent to a client, and the secret never leaves the server.
